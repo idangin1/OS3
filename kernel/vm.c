@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "proc.h"
+#include "spinlock.h"
 
 /*
  * the kernel's page table.
@@ -428,4 +430,129 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+handle_page_fault(void)
+{
+  uint virt_add = r_stval();
+  pte_t *pte = walk(myproc()->pagetable, (void*)virt_add, 0);
+  if(virt_add >= KERNBASE || pte == 0 || is_user_access_disabled(pte)) {
+    myproc()->killed = 1; //TODO should we increase total_page_fault
+    return 0;
+  }
+
+  #ifndef NONE
+    if(is_paged_out(pte)) {
+      //TODO should we increase total_page_fault
+      //PGROUNDOWN returns the offset (first 12 bits) of the VA
+      handle_page_out(PGROUNDDOWN(virt_add), pte);
+      return 0;
+    }
+  #endif
+
+}
+
+int
+is_user_access_disabled(pte_t* pte)
+{
+  if((*pte & PTE_U) > 0) {
+    return 0;
+  }
+  return 1;
+}
+
+int
+is_paged_out(pte_t* pte)
+{
+  if((*pte & PTE_PG) > 0) {
+    return 1;
+  }
+  return 0;
+}
+
+
+void
+handle_page_out(uint num, pte_t* pte)
+{
+  char* addr;
+  char buffer[PGSIZE];
+  memset(buffer, 0, PGSIZE);
+  if(myproc()->num_of_phys_pages == MAX_PSYC_PAGES) {
+    //achieved maximum page size
+    free_one_page();
+  }
+  
+  if((addr = kalloc()) == 0) { //kalloc failed
+    myproc()->killed = 1;
+    return;
+  }
+  //TODO CONTINUE
+
+}
+
+//This function is reponsible of freeing 1 page from the page table of the process
+void
+free_one_page()
+{
+  struct page *new_page;
+  struct page *phys_page = select_page(); //choose the page to remove
+  uint idx = MAX_TOTAL_PAGES;
+  
+  //this loop is responsible of finding space under swap_pages
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    if(myproc()->swap_pages[i].state == P_UNUSED) {
+      idx = i;
+      break;
+    }
+  }
+  
+  if(idx == MAX_TOTAL_PAGES) { //sanity check
+    panic("No free space was found under swap_pages array");
+  }
+
+  new_page = &myproc()->swap_pages[idx]; //pointing to the selected free space under swap_array
+  new_page->virtual_add = phys_page->virtual_add; //point to the address you want to delete
+  new_page->counter = phys_page->counter;
+  new_page->offset = idx*PGSIZE;
+  new_page->c_time = 0;
+  new_page->state = P_USED;
+
+  int success = writeToSwapFile(myproc(), (char*)PTE2PA((uint)phys_page->virtual_add), idx*PGSIZE, PGSIZE); //write to swap_file from physical address
+  
+  if(success < 0) { //sanity check
+    panic("failure during writing to swap file");
+  }
+
+  myproc()->num_of_phys_pages--;
+  myproc()->num_of_swap_pages++;
+
+  pte_t* p_table_entry = walk(myproc()->pagetable, phys_page->virtual_add, 0); //extract PTE from virtual address for the process' page-table
+  uint pa = PTE2PA((uint)*p_table_entry);
+  *p_table_entry = *p_table_entry | PTE_U | PTE_PG;  //set user bit and PG bit on
+  *p_table_entry = *p_table_entry & ~PTE_V;          //set valid bit off
+
+  phys_page->state = P_UNUSED;
+  phys_page->offset = 0;
+  phys_page->c_time = 0;
+  phys_page->virtual_add = 0;
+  phys_page->table = 0;
+
+  //TODO kfree on physical page VA?
+  
+  sfence_vma(); //TODO right place? should be between user<->kernel spaces
+}
+
+struct page*
+select_page(void)
+{
+  #if NFUA
+    return NFUA_page_selection();
+  #elif LAPA
+    return LAPA_page_selection();
+  #elif SCFIFO
+    return SCFIFO_page_selection();
+  #endif
+
+  return 0;
 }

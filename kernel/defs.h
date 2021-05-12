@@ -194,3 +194,15 @@ void            virtio_disk_intr(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+// Task 1
+void            copy_pages(struct proc*, struct page*, struct page*);
+void            init_page(struct proc*);
+int             copy_swap_file(struct proc*);
+
+int             handle_page_fault(void);
+int             is_user_access_disabled(pte_t*);
+int             is_paged_out(pte_t*);
+void            handle_page_out(uint, pte_t*);
+void            free_one_page(void);
+struct page*    select_page(void);

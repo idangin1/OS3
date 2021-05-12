@@ -1,3 +1,6 @@
+#define MAX_PSYC_PAGES 16
+#define MAX_TOTAL_PAGES 32
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -81,6 +84,20 @@ struct trapframe {
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+enum state { P_USED, P_UNUSED };
+
+struct page {
+  uint offset;            // page offset
+  char* virtual_add;      // virtual address
+  pagetable_t table;      // page table
+  uint counter;           // will be used for NFU policy + AGING
+  uint c_time;            // creation time for SCFIFO policy
+  
+  struct page* next;      // next page. TODO:NEEDED?
+  struct page* prev;      // prev page. TODO:NEEDED?
+
+  enum state state;       // state of page
+};
 
 // Per-process state
 struct proc {
@@ -107,4 +124,11 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   struct file *swapFile;
+
+  //Task 1
+  int num_of_phys_pages;      // # of physical pages
+  int num_of_swap_pages;      // # of swap pages
+  
+  struct page swap_pages[MAX_PSYC_PAGES]; // swap pages array for the process
+  struct page phys_pages[MAX_PSYC_PAGES]; // physical pages array for the process
 };

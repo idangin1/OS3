@@ -141,6 +141,14 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  //Task 1
+  init_page(p); // initialize page for this process
+  #ifndef NONE
+    if(p->pid > 2) {
+      createSwapFile(p);
+    }
+  #endif
+
   return p;
 }
 
@@ -164,6 +172,13 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  
+  //Task 1 - reset process page
+  #ifndef NONE
+    if(p->pid > 2) {
+      init_page(p);
+    }
+  #endif
 }
 
 // Create a user page table for a given process,
@@ -305,6 +320,17 @@ fork(void)
 
   pid = np->pid;
 
+  //Task 1 - copy pages from parent to child
+  #ifndef NONE
+    if(myproc()->pid > 2) {
+      np->num_of_phys_pages = 0;
+      np->num_of_swap_pages = myproc()->num_of_swap_pages;
+
+      copy_pages(np, np->swap_pages, myproc()->swap_pages);
+      copy_swap_file(np);
+    }
+  #endif
+
   release(&np->lock);
 
   acquire(&wait_lock);
@@ -357,6 +383,16 @@ exit(int status)
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+
+  //Task 1 - reset process pages
+  init_page(p);
+  #ifndef NONE
+    if(p->pid > 2 && p != 0) {
+      if(removeSwapFile(p) < 0) {
+        panic("exit: unable to remove swap file");
+      }
+    }
+  #endif
 
   acquire(&wait_lock);
 
@@ -654,3 +690,84 @@ procdump(void)
     printf("\n");
   }
 }
+
+//Task 1 - this function deep-copies the parent page arrays to his child
+void
+copy_pages(struct proc *np, struct page *child_arr, struct page *parent_arr)
+{
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    child_arr[i].state = parent_arr[i].state; //copy state to child
+    if(parent_arr[i].state == P_USED) { // copy only if the page is used for the parent process
+      child_arr[i].c_time = parent_arr[i].c_time;
+      child_arr[i].offset = parent_arr[i].offset;
+      child_arr[i].virtual_add = parent_arr[i].virtual_add;
+      child_arr[i].counter = parent_arr[i].counter;
+    } else { // in this case the page isn't used for the parent process
+      child_arr[i].c_time = 0;
+      child_arr[i].offset = 0;
+      child_arr[i].virtual_add = 0;
+      child_arr[i].counter = 0;
+
+      #if LAPA
+        // when a page is created or loaded into RAM - reset it's counter to 0xFFFFFFFF
+        child_arr[i].counter = 0xFFFFFFFF;
+      #endif
+    }
+  }
+}
+
+//Task 1 - initializing a page for process proc
+void
+init_page(struct proc* proc)
+{
+  proc->num_of_phys_pages = 0;
+  proc->num_of_swap_pages = 0;
+  
+  //init all pages array
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    //initialize physical page fields
+    proc->phys_pages[i].c_time = 0;
+    proc->phys_pages[i].virtual_add = 0;
+    proc->phys_pages[i].offset = 0;
+    proc->phys_pages[i].counter = 0;
+    proc->phys_pages[i].state = P_UNUSED;
+
+    //initialize swap page fields
+    proc->swap_pages[i].c_time = 0;
+    proc->swap_pages[i].virtual_add = 0;
+    proc->swap_pages[i].offset = 0;
+    proc->swap_pages[i].counter = 0;
+    proc->swap_pages[i].state = P_UNUSED;
+  }
+
+  #if LAPA
+    // when a page is created or loaded into RAM - reset it's counter to 0xFFFFFFFF
+    for(int j=0; j<MAX_PSYC_PAGES; j++) {
+      proc->phys_pages[j].counter = 0xFFFFFFFF;
+      proc->swap_pages[j].counter = 0xFFFFFFFF;
+    }
+  #endif
+}
+
+// this function will be called from fork in order to copy the swap files
+int
+copy_swap_file(struct proc* new_p)
+{
+  char buff[PGSIZE];
+  memset(buff, 0, PGSIZE); // initialize the buffer
+  for(int i=0; i < MAX_PSYC_PAGES; i++) {
+    if(readFromSwapFile(myproc(), buff, i*PGSIZE, PGSIZE) < 0) {
+      //unable to read from swap file
+      return -1;
+    }
+
+    if(writeToSwapFile(new_p, buff, i*PGSIZE, PGSIZE) < 0) {
+      //unable to write to swap file
+      return -1;
+    }
+
+    memset(buff, 0, PGSIZE);
+  }
+  return 1; //success
+}
+

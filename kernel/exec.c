@@ -21,6 +21,30 @@ exec(char *path, char **argv)
   pagetable_t pagetable = 0, oldpagetable;
   struct proc *p = myproc();
 
+  //Task 1+2
+  #ifndef NONE
+    int backup_num_of_phys_pages = 0;
+    int backup_num_of_swap_pages = 0;
+    
+    struct page backup_phys_pages[MAX_PSYC_PAGES]; //physical pages array
+    memset(backup_phys_pages, 0, sizeof(struct page));
+
+    struct page backup_swap_pages[MAX_PSYC_PAGES]; //swap pages array (32-16)
+    memset(backup_swap_pages, 0, sizeof(struct page));
+
+    //TODO: maybe >=2?
+    if(myproc()->pid > 2) {
+      backup_num_of_phys_pages = myproc()->num_of_phys_pages;
+      backup_num_of_swap_pages = myproc()->num_of_swap_pages;
+      
+      //deep copy of physical pages + swap pages to backup fields
+      copy_pages(myproc(),backup_phys_pages,myproc()->phys_pages);
+      copy_pages(myproc(),backup_swap_pages,myproc()->swap_pages);
+      
+      init_page(myproc()); // allocate a new physical page
+    }
+  #endif
+
   begin_op();
 
   if((ip = namei(path)) == 0){
@@ -107,7 +131,29 @@ exec(char *path, char **argv)
     if(*s == '/')
       last = s+1;
   safestrcpy(p->name, last, sizeof(p->name));
-    
+
+  //Task 1
+  #ifndef NONE
+    if(p->swapFile != 0) { // check if swap file not empty
+      removeSwapFile(p);
+      createSwapFile(p);
+    }
+
+    if(p->pid > 2) {
+      for(int idx = 0; idx < MAX_PSYC_PAGES; idx++) {
+        // deep copy iff current page is used
+        if(p->phys_pages[idx].state == P_USED) { 
+          p->phys_pages[idx].table = pagetable;  
+        }
+
+        // deep copy iff current page is used
+        if(p->swap_pages[idx].state == P_USED) { 
+          p->swap_pages[idx].table = pagetable;  
+        }
+      }
+    }
+  #endif
+
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
@@ -125,6 +171,16 @@ exec(char *path, char **argv)
     iunlockput(ip);
     end_op();
   }
+  
+  // Task 1.2 - restore parameters if exec fails
+  #ifndef NONE
+    if(p->pid > 2) {
+      p->num_of_phys_pages = backup_num_of_phys_pages;
+      p->num_of_swap_pages = backup_num_of_swap_pages;
+      copy_pages(p, p->phys_pages, backup_phys_pages);
+      copy_pages(p, p->swap_pages, backup_swap_pages);
+    }
+  #endif
   return -1;
 }
 
