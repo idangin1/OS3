@@ -437,7 +437,7 @@ handle_page_fault(void)
 {
   uint virt_add = r_stval();
   pte_t *pte = walk(myproc()->pagetable, (void*)virt_add, 0);
-  if(virt_add >= KERNBASE || pte == 0 || is_user_access_disabled(pte)) {
+  if(virt_add >= KERNBASE || pte == 0 || is_user_access_disabled(pte)) { //3rd cond: if the file is not accessible to user - don't try to bring it to memory
     myproc()->killed = 1; //TODO should we increase total_page_fault
     return 0;
   }
@@ -520,10 +520,10 @@ handle_page_out(uint va, pte_t* pte)
     panic("handle page out: couldn't find a valid page");
   }
 
+  //bring the data we want from the secondary memory (swap file) into the main memory
   if(readFromSwapFile(p, buffer, idx*PGSIZE, PGSIZE) == -1) { //sanity check
     panic("handle page out: unable to read data from swap_file");
   }
-
   memmove((void*)va, buffer, PGSIZE); // move the virtual address of the found page to va
   
   //initialize current index under swap_pages array
@@ -539,14 +539,14 @@ handle_page_out(uint va, pte_t* pte)
     p->swap_pages[idx].counter = 0xFFFFFFFF;
   #endif
 
-  add_page_to_phys_mem(p->pagetable, va);
+  add_page_to_phys_mem(va);
   
   sfence_vma();
 }
 
 //this function adds the provided pte to physical pages array
 void
-add_page_to_phys_mem(pte_t* pte, uint add)
+add_page_to_phys_mem(uint add)
 {
   struct page *free_pg;
   struct proc *p = myproc();
