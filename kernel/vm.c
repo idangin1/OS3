@@ -443,7 +443,7 @@ handle_page_fault(void)
   }
 
   #ifndef NONE
-    if(is_paged_out(pte)) {
+    if(is_paged_out(pte)) { //if PG flag is on - means that we had this page before in our memory
       //TODO should we increase total_page_fault
       //PGROUNDOWN returns the offset (first 12 bits) of the VA
       handle_page_out(PGROUNDDOWN(virt_add), pte);
@@ -451,6 +451,21 @@ handle_page_fault(void)
     }
   #endif
 
+  if(check_if_write(pte) == 1) { //write flag is on
+    myproc()->killed = 1;
+    return 0;
+  }
+
+  return 1;
+}
+
+int
+check_if_write(pte_t* pte)
+{
+  if((*pte & PTE_W) > 0) {
+    return 1;
+  }
+  return 0;
 }
 
 int
@@ -473,9 +488,10 @@ is_paged_out(pte_t* pte)
 
 
 void
-handle_page_out(uint num, pte_t* pte)
+handle_page_out(uint va, pte_t* pte)
 {
   char* addr;
+  int is_found = 0;
   char buffer[PGSIZE];
   memset(buffer, 0, PGSIZE);
   if(myproc()->num_of_phys_pages == MAX_PSYC_PAGES) {
@@ -487,8 +503,72 @@ handle_page_out(uint num, pte_t* pte)
     myproc()->killed = 1;
     return;
   }
-  //TODO CONTINUE
 
+  uint p_add = PTE2PA((uint)addr); //TODO right macro?
+  *pte = p_add | PTE_V | PTE_U | PTE_W;
+  *pte = *pte & ~PTE_PG; //indicate that the page is not paged-out
+  
+  int idx;
+  struct proc* p = myproc();
+  for(idx = 0; idx < MAX_PSYC_PAGES; idx++) {
+    if(p->swap_pages[idx].state == P_USED && p->swap_pages[idx].virtual_add == (char*)va) {
+      is_found = 1;
+      break;
+    }
+  }
+  if(is_found == 0) { //sanity check
+    panic("handle page out: couldn't find a valid page");
+  }
+
+  if(readFromSwapFile(p, buffer, idx*PGSIZE, PGSIZE) == -1) { //sanity check
+    panic("handle page out: unable to read data from swap_file");
+  }
+
+  memmove((void*)va, buffer, PGSIZE); // move the virtual address of the found page to va
+  
+  //initialize current index under swap_pages array
+  p->swap_pages[idx].offset = 0;
+  p->swap_pages[idx].c_time = 0;
+  p->swap_pages[idx].virtual_add = 0;
+  p->swap_pages[idx].state = P_UNUSED;
+  p->num_of_swap_pages--;
+
+  #if NFUA
+    p->swap_pages[idx].counter = 0;
+  #elif LAPA
+    p->swap_pages[idx].counter = 0xFFFFFFFF;
+  #endif
+
+  add_page_to_phys_mem(p->pagetable, va);
+  
+  sfence_vma();
+}
+
+//this function adds the provided pte to physical pages array
+void
+add_page_to_phys_mem(pte_t* pte, uint add)
+{
+  struct page *free_pg;
+  struct proc *p = myproc();
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    if(p->phys_pages[i].state == P_UNUSED) {
+      p->num_of_phys_pages++;
+      free_pg = &p->phys_pages[i];
+      free_pg->state = P_USED;
+      free_pg->offset = i*PGSIZE;
+      free_pg->virtual_add = (char*)add;
+
+      #if NFUA
+        free_pg->counter = 0;
+      #elif LAPA
+        free_pg->counter = 0xFFFFFFFF;
+      #elif SCFIFO
+        free_pg->c_time = ++time; //set and increase time
+      #endif
+      
+      break;
+    }
+  }
 }
 
 //This function is reponsible of freeing 1 page from the page table of the process

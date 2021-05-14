@@ -206,3 +206,5 @@ int             is_paged_out(pte_t*);
 void            handle_page_out(uint, pte_t*);
 void            free_one_page(void);
 struct page*    select_page(void);
+void            add_page_to_phys_mem(pte_t*, uint);
+int             check_if_write(pte_t*);
