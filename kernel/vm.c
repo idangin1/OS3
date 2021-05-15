@@ -5,8 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-#include "proc.h"
 #include "spinlock.h"
+#include "proc.h"
 
 uint time = 0;
 
@@ -438,7 +438,7 @@ int
 handle_page_fault(void)
 {
   uint virt_add = r_stval();
-  pte_t *pte = walk(myproc()->pagetable, (void*)virt_add, 0);
+  pte_t *pte = walk(myproc()->pagetable, virt_add, 0);
   if(virt_add >= KERNBASE || pte == 0 || is_user_access_disabled(pte)) { //3rd cond: if the file is not accessible to user - don't try to bring it to memory
     myproc()->killed = 1; //TODO should we increase total_page_fault
     return 0;
@@ -490,9 +490,9 @@ is_paged_out(pte_t* pte)
 
 
 void
-handle_page_out(uint va, pte_t* pte)
+handle_page_out(uint64 va, pte_t* pte)
 {
-  char* addr;
+  void* addr;
   int is_found = 0;
   char buffer[PGSIZE];
   memset(buffer, 0, PGSIZE);
@@ -506,7 +506,7 @@ handle_page_out(uint va, pte_t* pte)
     return;
   }
 
-  uint p_add = PTE2PA((uint)addr); //TODO right macro?
+  uint p_add = PTE2PA((uint64)addr); //TODO right macro?
   *pte = p_add | PTE_V | PTE_U | PTE_W;
   *pte = *pte & ~PTE_PG; //indicate that the page is not paged-out
   
@@ -548,7 +548,7 @@ handle_page_out(uint va, pte_t* pte)
 
 //this function adds the provided pte to physical pages array
 void
-add_page_to_phys_mem(uint add)
+add_page_to_phys_mem(uint64 add)
 {
   struct page *free_pg;
   struct proc *p = myproc();
@@ -600,7 +600,7 @@ free_one_page()
   new_page->c_time = 0;
   new_page->state = P_USED;
 
-  int success = writeToSwapFile(myproc(), (char*)PTE2PA((uint)phys_page->virtual_add), idx*PGSIZE, PGSIZE); //write to swap_file from physical address
+  int success = writeToSwapFile(myproc(), (char*)PTE2PA((uint64)phys_page->virtual_add), idx*PGSIZE, PGSIZE); //write to swap_file from physical address
   
   if(success < 0) { //sanity check
     panic("failure during writing to swap file");
@@ -609,8 +609,7 @@ free_one_page()
   myproc()->num_of_phys_pages--;
   myproc()->num_of_swap_pages++;
 
-  pte_t* p_table_entry = walk(myproc()->pagetable, phys_page->virtual_add, 0); //extract PTE from virtual address for the process' page-table
-  uint pa = PTE2PA((uint)*p_table_entry);
+  pte_t* p_table_entry = walk(myproc()->pagetable, (uint64)phys_page->virtual_add, 0); //extract PTE from virtual address for the process' page-table
   *p_table_entry = *p_table_entry | PTE_U | PTE_PG;  //set user bit and PG bit on
   *p_table_entry = *p_table_entry & ~PTE_V;          //set valid bit off
 
@@ -710,8 +709,7 @@ one_bits_counter(uint counter)
 struct page*
 SCFIFO_page_selection(void)
 {
-  int idx = 0;
-  struct page *pg;
+  struct page *pg = 0;
   struct proc *curr_proc = myproc();
   int min_creation_val;
 
@@ -726,8 +724,8 @@ SCFIFO_page_selection(void)
       }
     }
 
-    pte_t *pte = walk(curr_proc->pagetable, pg->virtual_add, 0); //get the entry of the phusical page we want to remove
-    if(*pte & PTE_A > 0) {
+    pte_t *pte = walk(curr_proc->pagetable, (uint64)pg->virtual_add, 0); //get the entry of the phusical page we want to remove
+    if((*pte & PTE_A) > 0) {
       *pte = *pte & ~PTE_A; //turn off access bit and give another chance later before selection
       pg->c_time = ++time; //update creation time so that this page will go to the end of the FIFO until next round
     } else {
@@ -748,10 +746,10 @@ NFUA_LAPA_handler(void)
   for(int i=0; i<MAX_PSYC_PAGES; i++) {
     if(curr_proc->phys_pages[i].state == P_USED) {
       curr_proc->phys_pages[i].counter = curr_proc->phys_pages[i].counter >> 1; //trim the LSB
-      pte = walk(curr_proc->pagetable, curr_proc->phys_pages[i].virtual_add, 0);
-      if(*pte & PTE_A > 0) { //access bit is on
+      pte = walk(curr_proc->pagetable, (uint64)curr_proc->phys_pages[i].virtual_add, 0);
+      if((*pte & PTE_A) > 0) { //access bit is on
         curr_proc->phys_pages[i].counter = curr_proc->phys_pages[i].counter | num; //turn on the MSB
-        *pte = *pte & ~PTE_A; //turn off access bit
+        *pte = (*pte & ~PTE_A); //turn off access bit
       }
     }
   }

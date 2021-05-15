@@ -85,6 +85,7 @@ usertrap(void)
   }
 
   cont: //TODO verify cont is always called
+    printf("arrived cont\n");
     if(p->killed)
       exit(-1);
 
