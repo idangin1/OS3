@@ -208,3 +208,8 @@ void            free_one_page(void);
 struct page*    select_page(void);
 void            add_page_to_phys_mem(uint);
 int             check_if_write(pte_t*);
+struct page*    NFUA_page_selection(void);
+struct page*    LAPA_page_selection(void);
+struct page*    SCFIFO_page_selection(void);
+int             one_bits_counter(uint);
+void            NFUA_LAPA_handler(void);

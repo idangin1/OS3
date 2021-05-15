@@ -8,6 +8,8 @@
 #include "proc.h"
 #include "spinlock.h"
 
+uint time = 0;
+
 /*
  * the kernel's page table.
  */
@@ -635,4 +637,122 @@ select_page(void)
   #endif
 
   return 0;
+}
+
+struct page*
+NFUA_page_selection(void)
+{
+  int idx = 0;
+  struct page *pg;
+  struct proc *curr_proc = myproc();
+  uint min_val = 0xFFFFFFFF;
+  
+  // get the minimum counter of all physical pages
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    if(curr_proc->phys_pages[i].state == P_USED) {
+      if(curr_proc->phys_pages[i].counter < min_val) {
+        min_val = curr_proc->phys_pages[i].counter;
+        idx = i;
+      }
+    }
+  }
+
+  pg = &curr_proc->phys_pages[idx]; //select the page
+  pg->counter = 0; //reset counter
+  return pg;
+}
+
+struct page*
+LAPA_page_selection(void)
+{
+  int idx = 0;
+  struct page *pg;
+  struct proc *curr_proc = myproc();
+  uint min_counter_val = 0xFFFFFFFF;
+  uint min_by_ones = 31;
+  int val;
+  
+  // get the minimum counter of all physical pages
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    if(curr_proc->phys_pages[i].state == P_USED) {
+      val = one_bits_counter(curr_proc->phys_pages[i].counter);
+      if(val < min_by_ones) {
+        min_by_ones = val;
+        min_counter_val = curr_proc->phys_pages[i].counter;
+        idx = i;
+      } else if(val == min_by_ones) {
+        if(curr_proc->phys_pages[i].counter < min_counter_val) {
+          min_counter_val = curr_proc->phys_pages[i].counter;
+          idx = i;
+        }
+      }
+    }
+  }
+
+  pg = &curr_proc->phys_pages[idx]; //select the page
+  pg->counter = 0xFFFFFFFF; //reset counter
+  return pg;
+}
+
+//count the number of bits of "1" for the counter inserted. Necessary for LAPA page selection
+int
+one_bits_counter(uint counter) 
+{
+  uint new_counter = 0;
+  while(counter) {
+    new_counter += counter & 1; //if the LSB is 1 add to counter, otherwise - don't add
+    counter = counter >> 1; // trim the LSB
+  }
+
+  return new_counter;
+}
+
+struct page*
+SCFIFO_page_selection(void)
+{
+  int idx = 0;
+  struct page *pg;
+  struct proc *curr_proc = myproc();
+  int min_creation_val;
+
+  while(1) {
+    min_creation_val = time + 1;
+    for(int i=0; i<MAX_PSYC_PAGES; i++) {
+      if(curr_proc->phys_pages[i].state == P_USED) {
+        if(curr_proc->phys_pages[i].c_time < min_creation_val) {
+          pg = &curr_proc->phys_pages[i];
+          min_creation_val = pg->c_time;
+        }
+      }
+    }
+
+    pte_t *pte = walk(curr_proc->pagetable, pg->virtual_add, 0); //get the entry of the phusical page we want to remove
+    if(*pte & PTE_A > 0) {
+      *pte = *pte & ~PTE_A; //turn off access bit and give another chance later before selection
+      pg->c_time = ++time; //update creation time so that this page will go to the end of the FIFO until next round
+    } else {
+      pg->c_time = 0;
+      return pg;
+    }
+  }
+}
+
+void
+NFUA_LAPA_handler(void)
+{
+  uint num = 1 << 31;
+  pte_t *pte = 0;
+  struct proc *curr_proc = myproc();
+  
+  //go over all physical pages and check for access bit. Turn it off after increase the MSB
+  for(int i=0; i<MAX_PSYC_PAGES; i++) {
+    if(curr_proc->phys_pages[i].state == P_USED) {
+      curr_proc->phys_pages[i].counter = curr_proc->phys_pages[i].counter >> 1; //trim the LSB
+      pte = walk(curr_proc->pagetable, curr_proc->phys_pages[i].virtual_add, 0);
+      if(*pte & PTE_A > 0) { //access bit is on
+        curr_proc->phys_pages[i].counter = curr_proc->phys_pages[i].counter | num; //turn on the MSB
+        *pte = *pte & ~PTE_A; //turn off access bit
+      }
+    }
+  }
 }

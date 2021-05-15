@@ -490,6 +490,12 @@ scheduler(void)
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
+        
+        #if NFUA
+          NFUA_LAPA_handler();
+        #elif LAPA
+          NFUA_LAPA_handler();
+        #endif
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.

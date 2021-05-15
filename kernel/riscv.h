@@ -331,6 +331,7 @@ sfence_vma()
 #define PTE_W (1L << 2)
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4) // 1 -> user can access
+#define PTE_A (1L << 6) // page access
 // Task 1
 #define PTE_PG (1L << 10) // Paged out to secondary storage (1024) this flag will indicate if the page is paged-out
 
