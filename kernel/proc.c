@@ -108,6 +108,7 @@ allocproc(void)
 
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
+    // printf("acquired :)\n", p->pid);
     if(p->state == UNUSED) {
       goto found;
     } else {
@@ -145,7 +146,9 @@ found:
   init_page(p); // initialize page for this process
   #ifndef NONE
     if(p->pid > 2) {
+      release(&p->lock);
       createSwapFile(p);
+      acquire(&p->lock);
     }
   #endif
 
@@ -172,13 +175,6 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-  
-  //Task 1 - reset process page
-  #ifndef NONE
-    if(p->pid > 2) {
-      init_page(p);
-    }
-  #endif
 }
 
 // Create a user page table for a given process,
@@ -325,12 +321,11 @@ fork(void)
     if(myproc()->pid > 2) {
       np->num_of_phys_pages = 0;
       np->num_of_swap_pages = myproc()->num_of_swap_pages;
-
       copy_pages(np, np->swap_pages, myproc()->swap_pages);
+      //TODO kerneltrap here
       copy_swap_file(np);
     }
   #endif
-
   release(&np->lock);
 
   acquire(&wait_lock);
@@ -388,9 +383,11 @@ exit(int status)
   init_page(p);
   #ifndef NONE
     if(p->pid > 2 && p != 0) {
+      release(&p->lock);
       if(removeSwapFile(p) < 0) {
         panic("exit: unable to remove swap file");
       }
+      acquire(&p->lock);
     }
   #endif
 
@@ -444,6 +441,12 @@ wait(uint64 addr)
             return -1;
           }
           freeproc(np);
+          //Task 1 - reset process page
+          #ifndef NONE
+            if(p->pid > 2) {
+              init_page(p);
+            }
+          #endif
           release(&np->lock);
           release(&wait_lock);
           return pid;

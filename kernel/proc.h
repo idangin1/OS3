@@ -92,9 +92,6 @@ struct page {
   pagetable_t table;      // page table
   uint counter;           // will be used for NFU policy + AGING
   uint c_time;            // creation time for SCFIFO policy
-  
-  struct page* next;      // next page. TODO:NEEDED?
-  struct page* prev;      // prev page. TODO:NEEDED?
 
   enum state state;       // state of page
 };

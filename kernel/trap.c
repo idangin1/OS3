@@ -70,12 +70,10 @@ usertrap(void)
     printf("            stval=%p\n", r_stval());
     if(myproc() != 0 && myproc()->pid > 2) {
       int num = handle_page_fault();
-      if(num != 1) {
-        goto cont;
+      if(num == 1) {
+        p->killed = 1; //page fault scenario in user-space
       }
     }
-    //page fault scenario in user-space
-    p->killed = 1;
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -84,16 +82,14 @@ usertrap(void)
     p->killed = 1;
   }
 
-  cont: //TODO verify cont is always called
-    printf("arrived cont\n");
-    if(p->killed)
-      exit(-1);
+  if(p->killed)
+    exit(-1);
 
-    // give up the CPU if this is a timer interrupt.
-    if(which_dev == 2)
-      yield();
+  // give up the CPU if this is a timer interrupt.
+  if(which_dev == 2)
+    yield();
 
-    usertrapret();
+  usertrapret();
 }
 
 //
