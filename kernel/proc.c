@@ -316,20 +316,20 @@ fork(void)
 
   pid = np->pid;
 
-  //Task 1 - copy pages from parent to child
-  #ifndef NONE
-    if(myproc()->pid > 2) {
-      np->num_of_phys_pages = 0;
-      np->num_of_swap_pages = myproc()->num_of_swap_pages;
-      copy_pages(np, np->swap_pages, myproc()->swap_pages);
-      //TODO kerneltrap here
-      copy_swap_file(np);
-    }
-  #endif
   release(&np->lock);
-
+    //Task 1 - copy pages from parent to child
+    #ifndef NONE
+    if(myproc()->pid > 2) {
+        np->num_of_phys_pages = 0;
+        np->num_of_swap_pages = myproc()->num_of_swap_pages;
+        copy_pages(np, np->swap_pages, myproc()->swap_pages);
+        //TODO kerneltrap here
+        copy_swap_file(np);
+    }
+    #endif
   acquire(&wait_lock);
   np->parent = p;
+
   release(&wait_lock);
 
   acquire(&np->lock);
@@ -383,11 +383,9 @@ exit(int status)
   init_page(p);
   #ifndef NONE
     if(p->pid > 2 && p != 0) {
-      release(&p->lock);
       if(removeSwapFile(p) < 0) {
         panic("exit: unable to remove swap file");
       }
-      acquire(&p->lock);
     }
   #endif
 
@@ -711,11 +709,13 @@ copy_pages(struct proc *np, struct page *child_arr, struct page *parent_arr)
       child_arr[i].offset = parent_arr[i].offset;
       child_arr[i].virtual_add = parent_arr[i].virtual_add;
       child_arr[i].counter = parent_arr[i].counter;
+//      child_arr[i].table = parent_arr[i].table;
     } else { // in this case the page isn't used for the parent process
       child_arr[i].c_time = 0;
       child_arr[i].offset = 0;
       child_arr[i].virtual_add = 0;
       child_arr[i].counter = 0;
+//      child_arr[i].table = 0;
 
       #if LAPA
         // when a page is created or loaded into RAM - reset it's counter to 0xFFFFFFFF
@@ -759,12 +759,16 @@ init_page(struct proc* proc)
 }
 
 // this function will be called from fork in order to copy the swap files
+//static char buff[PGSIZE];
 int
 copy_swap_file(struct proc* new_p)
 {
-  char buff[PGSIZE];
-  memset(buff, 0, PGSIZE); // initialize the buffer
+//  memset(buff, 0, PGSIZE); // initialize the buffer
   for(int i=0; i < MAX_PSYC_PAGES; i++) {
+      char* buff;
+      if((buff = kalloc())==0){
+          panic("unable to kalloc for buffer");
+      }
     if(readFromSwapFile(myproc(), buff, i*PGSIZE, PGSIZE) < 0) {
       //unable to read from swap file
       return -1;
@@ -775,8 +779,13 @@ copy_swap_file(struct proc* new_p)
       return -1;
     }
 
-    memset(buff, 0, PGSIZE);
+    kfree(buff);
   }
   return 1; //success
 }
 
+int
+getFreePagesAmount(void)
+{
+    return getFreePagesAmountFromKalloc();
+}

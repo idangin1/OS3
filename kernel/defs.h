@@ -214,3 +214,5 @@ struct page*    LAPA_page_selection(void);
 struct page*    SCFIFO_page_selection(void);
 int             one_bits_counter(uint);
 void            NFUA_LAPA_handler(void);
+int             getFreePagesAmount(void);
+int             getFreePagesAmountFromKalloc(void);
