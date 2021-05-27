@@ -25,22 +25,23 @@ exec(char *path, char **argv)
   #ifndef NONE
     int backup_num_of_phys_pages = 0;
     int backup_num_of_swap_pages = 0;
-    
+    int backup_num_of_page_faults = 0;
+
     struct page backup_phys_pages[MAX_PSYC_PAGES]; //physical pages array
     memset(backup_phys_pages, 0, sizeof(struct page));
 
     struct page backup_swap_pages[MAX_PSYC_PAGES]; //swap pages array (32-16)
     memset(backup_swap_pages, 0, sizeof(struct page));
 
-    //TODO: maybe >=2?
     if(myproc()->pid > 2) {
       backup_num_of_phys_pages = myproc()->num_of_phys_pages;
       backup_num_of_swap_pages = myproc()->num_of_swap_pages;
-      
+      backup_num_of_page_faults = myproc()->total_page_faults;
+
       //deep copy of physical pages + swap pages to backup fields
       copy_pages(myproc(),backup_phys_pages,myproc()->phys_pages);
       copy_pages(myproc(),backup_swap_pages,myproc()->swap_pages);
-      
+
       init_page(myproc()); // allocate a new physical page
     }
   #endif
@@ -177,6 +178,7 @@ exec(char *path, char **argv)
     if(p->pid > 2) {
       p->num_of_phys_pages = backup_num_of_phys_pages;
       p->num_of_swap_pages = backup_num_of_swap_pages;
+      p->total_page_faults = backup_num_of_page_faults;
       copy_pages(p, p->phys_pages, backup_phys_pages);
       copy_pages(p, p->swap_pages, backup_swap_pages);
     }

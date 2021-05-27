@@ -101,3 +101,9 @@ sys_getFreePagesAmount(void)
 {
     return getFreePagesAmount();
 }
+
+uint64
+sys_getPageFaultAmount(void)
+{
+    return getPageFaultAmount();
+}

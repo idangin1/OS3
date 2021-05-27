@@ -65,15 +65,19 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if(r_scause() == 13 || r_scause() == 15){ //page fault received
-    printf("pagefault: unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            stval=%p\n", r_stval());
-    if(myproc() != 0 && myproc()->pid > 2) {
-      int num = handle_page_fault();
-      if(num == 1) {
-        p->killed = 1; //page fault scenario in user-space
-      }
-    }
+
+#ifndef NONE
+  } else if(r_scause() == 12 || r_scause() == 13 || r_scause() == 15){ //page fault received
+        printf("pagefault: unexpected scause %p pid=%d page=%d\n", r_scause(), p->pid, PGROUNDDOWN(r_stval())/PGSIZE);
+        printf("            stval=%p\n", r_stval());
+        if(myproc() != 0 && myproc()->pid > 2) {
+          int num = handle_page_fault();
+//          handle_page_fault();
+          if(num == 1) {
+            p->killed = 1; //page fault scenario in user-space
+          }
+        }
+#endif
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -153,9 +157,9 @@ kerneltrap()
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
-    printf("scause %p\n", scause);
-    printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
-    panic("kerneltrap");
+     printf("scause %p\n", scause);
+     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+     panic("kerneltrap");
   }
 
   // give up the CPU if this is a timer interrupt.

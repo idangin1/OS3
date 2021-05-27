@@ -322,6 +322,7 @@ fork(void)
     if(myproc()->pid > 2) {
         np->num_of_phys_pages = 0;
         np->num_of_swap_pages = myproc()->num_of_swap_pages;
+        np->total_page_faults = 0;
         copy_pages(np, np->swap_pages, myproc()->swap_pages);
         //TODO kerneltrap here
         copy_swap_file(np);
@@ -382,7 +383,7 @@ exit(int status)
   //Task 1 - reset process pages
   init_page(p);
   #ifndef NONE
-    if(p->pid > 2 && p != 0) {
+    if(p != 0 && p->pid > 2) {
       if(removeSwapFile(p) < 0) {
         panic("exit: unable to remove swap file");
       }
@@ -731,6 +732,7 @@ init_page(struct proc* proc)
 {
   proc->num_of_phys_pages = 0;
   proc->num_of_swap_pages = 0;
+  proc->total_page_faults = 0;
   
   //init all pages array
   for(int i=0; i<MAX_PSYC_PAGES; i++) {
@@ -788,4 +790,10 @@ int
 getFreePagesAmount(void)
 {
     return getFreePagesAmountFromKalloc();
+}
+
+int
+getPageFaultAmount(void)
+{
+    return myproc()->total_page_faults;
 }

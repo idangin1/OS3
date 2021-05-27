@@ -88,7 +88,7 @@ enum state { P_USED, P_UNUSED };
 
 struct page {
   uint offset;            // page offset
-  char* virtual_add;      // virtual address
+  uint64 virtual_add;      // virtual address
   pagetable_t table;      // page table
   uint counter;           // will be used for NFU policy + AGING
   uint c_time;            // creation time for SCFIFO policy
@@ -125,7 +125,8 @@ struct proc {
   //Task 1
   int num_of_phys_pages;      // # of physical pages
   int num_of_swap_pages;      // # of swap pages
-  
+  int total_page_faults;      // # of page faults TODO:maybe uint
+
   struct page swap_pages[MAX_PSYC_PAGES]; // swap pages array for the process
   struct page phys_pages[MAX_PSYC_PAGES]; // physical pages array for the process
 };

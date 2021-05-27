@@ -140,6 +140,10 @@ UPROGS=\
 	$U/_zombie\
 	$U/_lazytests\
 	$U/_sanity\
+	$U/_test\
+	$U/_testPatch\
+	$U/_testsh\
+	$U/_dolavtest\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

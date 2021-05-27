@@ -175,11 +175,13 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
+//    if((*pte & PTE_V) == 0)
+    if((*pte & PTE_V) == 0 && (*pte & PTE_PG)==0)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
+//    if(do_free){
+    if(do_free && ((*pte & PTE_PG) == 0)){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
@@ -222,13 +224,28 @@ uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
+  int physical_page = myproc()->num_of_phys_pages;
+  int swap_pages = myproc()->num_of_swap_pages;
   uint64 a;
+  int total_pages = physical_page + swap_pages;
+  if(total_pages == MAX_TOTAL_PAGES) {
+      panic("impossible to alloc page - reach to max size");
+  }
 
   if(newsz < oldsz)
     return oldsz;
 
   oldsz = PGROUNDUP(oldsz);
+  int idx_counter = 0;
   for(a = oldsz; a < newsz; a += PGSIZE){
+    idx_counter++;
+      #ifndef NONE
+        if(myproc()!=0 && myproc()->pid > 2) {
+            if(myproc()->num_of_phys_pages == MAX_PSYC_PAGES) {
+                free_one_page();
+            }
+        }
+    #endif
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
@@ -240,6 +257,12 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+
+    #ifndef  NONE
+      if(myproc()!=0 && myproc()->pid > 2) { //now we want to add the physical page to the memory
+          add_page_to_phys_mem(a);
+      }
+    #endif
   }
   return newsz;
 }
@@ -249,17 +272,86 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 // need to be less than oldsz.  oldsz can be larger than the actual
 // process size.  Returns the new process size.
 uint64
-uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
+uvmdeallocnew(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
+//    pte_t *pte;
+//    uint64 add;
+//    uint pa;
   if(newsz >= oldsz)
     return oldsz;
+
+//  add = PGROUNDUP(newsz);
+//  for(;add<oldsz;add+=PGSIZE) {
+//      pte = walk(pagetable, add,0);
+//    #ifndef NONE
+//        int found = 0;
+//        int i;
+//        for(i=0; i<MAX_PSYC_PAGES; i++) {
+//            if((myproc()->phys_pages[i].virtual_add == add) && (myproc()->phys_pages[i].state == P_USED)) { //search for the desired physical page
+//                found = i;
+//                break;
+//            }
+//        }
+//    #endif
+//    if(!pte) {
+//        uint pdx = (((uint)(add) >> 22) & 0x3FF); // 22 = offset of PDX in a linear address
+//        add = (uint)((pdx+1) << 22) - PGSIZE;
+//    } else if((*pte & PTE_V) != 0) { // this page is present in the physical memo
+//        pa = ((uint)(*pte) & ~0xFFF);
+//        if(pa==0) {
+//            panic("panic during deallocuvm - caused by kfree");
+//        }
+//        //remove page from physical memory
+//    #ifndef NONE
+//    if(found) {
+//        remove_page_from_memo(pagetable, add, myproc()->phys_pages);
+//        if(myproc()->num_of_phys_pages > 0) {
+//            myproc()->num_of_phys_pages--;
+//        }
+//    }
+//    #endif
+//
+//    uint64 v = PA2PTE(pa); //TODO wrong macro?
+//    kfree((void*)v);
+//    } else if((*pte & PTE_PG) > 0) { //remove the page from swap memory iff the page is not in the memo
+//        #ifndef NONE
+//            remove_page_from_memo(pagetable, add, myproc()->swap_pages);
+//            if(myproc()->num_of_swap_pages > 0) {
+//                myproc()->num_of_swap_pages--;
+//            }
+//            *pte = 0;
+//        #endif
+//    }
+////
+////    return newsz; //TODO compare dealloc
+//  }
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    for (int a = PGROUNDDOWN(oldsz); a > PGROUNDDOWN(newsz); a -= PGSIZE) {
+        if(myproc()!=0 && myproc()->pid > 2){
+            remove_page_from_memo(0,a,myproc()->phys_pages);
+        }
+
+    }
   }
 
   return newsz;
+}
+
+uint64
+uvmdealloc(pagetable_t pte, uint64 oldsz, uint64 newsz)
+{
+    if(myproc()!=0 && myproc()->pid > 2) {
+        return uvmdeallocnew(pte, oldsz ,newsz);
+    }
+
+    if(newsz >= oldsz) {
+        return oldsz;
+    } else {
+        return newsz;
+    }
 }
 
 // Recursively free page-table pages.
@@ -309,13 +401,15 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
+    if((*pte & PTE_V) == 0 && (*pte & PTE_PG) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
+    if ((flags & PTE_PG) == 0) {
+        if ((mem = kalloc()) == 0)
+            goto err;
+        memmove(mem, (char *) pa, PGSIZE);
+    }
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;
@@ -327,6 +421,16 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uvmunmap(new, 0, i / PGSIZE, 1);
   return -1;
 }
+
+//int
+//uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+//{
+//    if(myproc()!=0 && myproc()->pid > 2) {
+//        return uvmcopynew(old, new, sz);
+//    }
+//
+//    return 0;
+//}
 
 // mark a PTE invalid for user access.
 // used by exec for the user stack guard page.
@@ -437,26 +541,24 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 int
 handle_page_fault(void)
 {
-  uint virt_add = r_stval();
+  uint64 virt_add = r_stval();
   pte_t *pte = walk(myproc()->pagetable, virt_add, 0);
   if(virt_add >= KERNBASE || pte == 0 || is_user_access_disabled(pte)) { //3rd cond: if the file is not accessible to user - don't try to bring it to memory
+//    myproc()->total_page_faults++;
     myproc()->killed = 1; //TODO should we increase total_page_fault
     return 0;
   }
 
   #ifndef NONE
     if(is_paged_out(pte)) { //if PG flag is on - means that we had this page before in our memory
-      //TODO should we increase total_page_fault
-      //PGROUNDOWN returns the offset (first 12 bits) of the VA
-      handle_page_out(PGROUNDDOWN(virt_add), pte);
-      return 0;
+        //TODO should we increase total_page_fault
+        //PGROUNDOWN returns the offset (first 12 bits) of the VA
+        myproc()->total_page_faults++;
+        uint64 rounded = PGROUNDDOWN(virt_add);
+            handle_page_out(rounded, pte);
+            return 0;
     }
   #endif
-
-  if(check_if_write(pte) == 1) { //write flag is on
-    myproc()->killed = 1;
-    return 0;
-  }
 
   return 1;
 }
@@ -488,32 +590,23 @@ is_paged_out(pte_t* pte)
   return 0;
 }
 
-
 void
 handle_page_out(uint64 va, pte_t* pte)
 {
-  void* addr;
   int is_found = 0;
-  char buffer[PGSIZE];
-  memset(buffer, 0, PGSIZE);
   if(myproc()->num_of_phys_pages == MAX_PSYC_PAGES) {
     //achieved maximum page size
     free_one_page();
   }
-  
-  if((addr = kalloc()) == 0) { //kalloc failed
-    myproc()->killed = 1;
-    return;
-  }
 
-  uint p_add = PTE2PA((uint64)addr); //TODO right macro?
-  *pte = p_add | PTE_V | PTE_U | PTE_W;
-  *pte = *pte & ~PTE_PG; //indicate that the page is not paged-out
-  
+//  uint p_add = PTE2PA((uint64)addr); //TODO right macro?
+//  *pte = /*p_add | */PTE_V | PTE_U | PTE_W;
+//  *pte = *pte & ~PTE_PG; //indicate that the page is not paged-out
+
   int idx;
   struct proc* p = myproc();
   for(idx = 0; idx < MAX_PSYC_PAGES; idx++) {
-    if(p->swap_pages[idx].state == P_USED && p->swap_pages[idx].virtual_add == (char*)va) {
+    if(p->swap_pages[idx].state == P_USED && p->swap_pages[idx].virtual_add == va) {
       is_found = 1;
       break;
     }
@@ -523,12 +616,30 @@ handle_page_out(uint64 va, pte_t* pte)
   }
 
   //bring the data we want from the secondary memory (swap file) into the main memory
+  char* buffer;
+  if ( (buffer = kalloc()) == 0 ) {
+      panic("failed to kalloc");
+  }
+
+  char* mem;
+  if ( (mem = kalloc()) == 0 ) {
+      panic("failed to kalloc");
+  }
+
   if(readFromSwapFile(p, buffer, idx*PGSIZE, PGSIZE) == -1) { //sanity check
     panic("handle page out: unable to read data from swap_file");
   }
-  memmove((void*)va, buffer, PGSIZE); // move the virtual address of the found page to va
+
+  memmove(mem,buffer,PGSIZE);
+  int new_flag = (PTE_FLAGS(*pte) & ~PTE_PG) | PTE_V | PTE_U | PTE_W;
+  *pte = PA2PTE(mem) | new_flag;
+//  *pte = PA2PTE(buffer) | PTE_FLAGS(*pte) | PTE_V;
+//  *pte = *pte & ~PTE_PG; //indicate that the page is not paged-out
+//  *pte = *pte | PTE_V;
+//  memmove((void*) PTE2PA(va), buffer, PGSIZE); // change the data of va (virtual address we want) to point to buffer, which includes the swap_file data
   
   //initialize current index under swap_pages array
+//  va = buffer; // update pte using the npa
   p->swap_pages[idx].offset = 0;
   p->swap_pages[idx].c_time = 0;
   p->swap_pages[idx].virtual_add = 0;
@@ -558,7 +669,7 @@ add_page_to_phys_mem(uint64 add)
       free_pg = &p->phys_pages[i];
       free_pg->state = P_USED;
       free_pg->offset = i*PGSIZE;
-      free_pg->virtual_add = (char*)add;
+      free_pg->virtual_add = add;
 
       #if NFUA
         free_pg->counter = 0;
@@ -600,8 +711,10 @@ free_one_page()
   new_page->c_time = 0;
   new_page->state = P_USED;
 
-  int success = writeToSwapFile(myproc(), (char*)PTE2PA((uint64)phys_page->virtual_add), idx*PGSIZE, PGSIZE); //write to swap_file from physical address
-  
+  uint64 pa = walkaddr(myproc()->pagetable, PGROUNDDOWN(phys_page->virtual_add));
+//  int success = writeToSwapFile(myproc(), (char*)PTE2PA(phys_page->virtual_add), idx*PGSIZE, PGSIZE); //write to swap_file from physical address
+  int success = writeToSwapFile(myproc(), (char*)pa, idx*PGSIZE, PGSIZE); //write to swap_file from physical address
+
   if(success < 0) { //sanity check
     panic("failure during writing to swap file");
   }
@@ -609,7 +722,12 @@ free_one_page()
   myproc()->num_of_phys_pages--;
   myproc()->num_of_swap_pages++;
 
-  pte_t* p_table_entry = walk(myproc()->pagetable, (uint64)phys_page->virtual_add, 0); //extract PTE from virtual address for the process' page-table
+  //Task2
+//  char* v =(char*) walk(myproc()->pagetable, PGROUNDDOWN(phys_page->virtual_add),0);
+//  kfree(v);
+    kfree((void*)pa);
+
+  pte_t* p_table_entry = walk(myproc()->pagetable, phys_page->virtual_add, 0); //extract PTE from virtual address for the process' page-table
   *p_table_entry = *p_table_entry | PTE_U | PTE_PG;  //set user bit and PG bit on
   *p_table_entry = *p_table_entry & ~PTE_V;          //set valid bit off
 
@@ -716,15 +834,16 @@ SCFIFO_page_selection(void)
   while(1) {
     min_creation_val = time + 1;
     for(int i=0; i<MAX_PSYC_PAGES; i++) {
-      if(curr_proc->phys_pages[i].state == P_USED) {
-        if(curr_proc->phys_pages[i].c_time < min_creation_val) {
-          pg = &curr_proc->phys_pages[i];
-          min_creation_val = pg->c_time;
+        pte_t *my_pte = walk(curr_proc->pagetable, curr_proc->phys_pages[i].virtual_add, 0);
+        if((curr_proc->phys_pages[i].state == P_USED) && (*my_pte & PTE_U)) {
+            if(curr_proc->phys_pages[i].c_time < min_creation_val) {
+              pg = &curr_proc->phys_pages[i];
+              min_creation_val = pg->c_time;
+            }
         }
-      }
     }
 
-    pte_t *pte = walk(curr_proc->pagetable, (uint64)pg->virtual_add, 0); //get the entry of the phusical page we want to remove
+    pte_t *pte = walk(curr_proc->pagetable, pg->virtual_add, 0); //get the entry of the physical page we want to remove
     if((*pte & PTE_A) > 0) {
       *pte = *pte & ~PTE_A; //turn off access bit and give another chance later before selection
       pg->c_time = ++time; //update creation time so that this page will go to the end of the FIFO until next round
@@ -753,4 +872,25 @@ NFUA_LAPA_handler(void)
       }
     }
   }
+}
+
+void
+remove_page_from_memo(pte_t *pte, uint add, struct page *arr)
+{
+    struct page* p;
+    for(int i=0; i<MAX_PSYC_PAGES; i++) {
+        if((arr[i].virtual_add == add) && (arr[i].state == P_USED)) { //find the physical page matches the virtual address nad reset its' values
+            p = &(arr[i]);
+            p->counter = 0;
+            p->table = 0;
+            p->virtual_add = 0;
+            p->c_time = 0;
+            p->state = P_UNUSED;
+            p->offset = 0;
+            #if LAPA
+                p->counter = 0xFFFFFFFF;
+            #endif
+            break;
+        }
+    }
 }
